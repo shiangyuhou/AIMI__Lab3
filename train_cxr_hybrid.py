@@ -44,7 +44,6 @@ REVISION = "110cbc18d5133582e320b43d53bf5c44e410c936"
 MODEL_ID = "microsoft/rad-dino"
 PACKAGE_ROOT = Path(__file__).resolve().parent
 OFFLINE_CACHE = PACKAGE_ROOT / "data" / "offline_cache"
-RAD_DINO_CONFIG = PACKAGE_ROOT / "config" / "rad_dino"
 
 
 def configure_cache():
@@ -53,8 +52,19 @@ def configure_cache():
         os.environ["TORCH_HOME"] = str(torch_cache)
 
 
+def rad_dino_snapshot():
+    return OFFLINE_CACHE / "huggingface" / "hub" / "models--microsoft--rad-dino" / "snapshots" / REVISION
+
+
+def rad_dino_processor_source():
+    snapshot = rad_dino_snapshot()
+    if (snapshot / "preprocessor_config.json").is_file():
+        return snapshot, {"local_files_only": True}
+    return MODEL_ID, {"revision": REVISION}
+
+
 def rad_dino_weights_source():
-    snapshot = OFFLINE_CACHE / "huggingface" / "hub" / "models--microsoft--rad-dino" / "snapshots" / REVISION
+    snapshot = rad_dino_snapshot()
     if all((snapshot / name).is_file() for name in ("config.json", "model.safetensors")):
         return snapshot, {"local_files_only": True}
     return MODEL_ID, {"revision": REVISION, "use_safetensors": True}
@@ -343,7 +353,8 @@ def train(args):
     # 1. Image Preprocessors
     from transformers import AutoImageProcessor, Dinov2Model
     print("Loading pretrained foundation backbones...")
-    dino_processor = AutoImageProcessor.from_pretrained(RAD_DINO_CONFIG, use_fast=False, local_files_only=True)
+    processor_source, processor_options = rad_dino_processor_source()
+    dino_processor = AutoImageProcessor.from_pretrained(processor_source, use_fast=False, **processor_options)
     dino_transform = lambda img: dino_processor(images=img, return_tensors="pt").pixel_values[0]
 
     cnn_transform = transforms.Compose([

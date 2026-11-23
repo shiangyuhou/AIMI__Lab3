@@ -9,8 +9,7 @@ from torch.utils.data import DataLoader
 from torchvision import models, transforms
 
 from train_cxr_hybrid import (
-    CSV_COLUMNS, MODEL_ID, PACKAGE_ROOT, REVISION, CXRDataset, CXRHierViTHybrid,
-    configure_cache, dataset_path,
+    CSV_COLUMNS, PACKAGE_ROOT, RAD_DINO_CONFIG, CXRDataset, CXRHierViTHybrid, dataset_path,
 )
 
 
@@ -56,12 +55,13 @@ def main():
         parser.error("CUDA is required for FP16 inference")
     if args.output.exists():
         parser.error("The output CSV already exists. Choose a new path.")
+    if not args.checkpoint.is_file():
+        parser.error(f"Checkpoint not found: {args.checkpoint}. Pass --checkpoint with your local .pt file.")
 
-    configure_cache()
     from transformers import AutoImageProcessor, Dinov2Config, Dinov2Model
 
-    config = Dinov2Config.from_pretrained(MODEL_ID, revision=REVISION, local_files_only=True)
-    processor = AutoImageProcessor.from_pretrained(MODEL_ID, revision=REVISION, use_fast=False, local_files_only=True)
+    config = Dinov2Config.from_pretrained(RAD_DINO_CONFIG, local_files_only=True)
+    processor = AutoImageProcessor.from_pretrained(RAD_DINO_CONFIG, use_fast=False, local_files_only=True)
     model = CXRHierViTHybrid(Dinov2Model(config), models.convnext_tiny(weights=None).features)
     load_checkpoint(model, args.checkpoint)
     device = torch.device("cuda")

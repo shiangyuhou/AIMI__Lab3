@@ -1,3 +1,4 @@
 Report*
 *.zip
 *.pt
+.venv

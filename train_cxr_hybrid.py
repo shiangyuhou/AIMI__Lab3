@@ -19,7 +19,7 @@ import csv
 import json
 import os
 import shutil
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import perf_counter
@@ -44,6 +44,8 @@ REVISION = "110cbc18d5133582e320b43d53bf5c44e410c936"
 MODEL_ID = "microsoft/rad-dino"
 PACKAGE_ROOT = Path(__file__).resolve().parent
 OFFLINE_CACHE = PACKAGE_ROOT / "data" / "offline_cache"
+DATASET_ARCHIVE = "nycu-aimi-2026-lab3-cxr.zip"
+SUBMISSION_TEMPLATE = "test_data_sample.csv"
 
 
 def configure_cache():
@@ -70,23 +72,43 @@ def rad_dino_weights_source():
     return MODEL_ID, {"revision": REVISION, "use_safetensors": True}
 
 
+def missing_dataset_entries(directory):
+    csv_files = ("train_data.csv", "val_data.csv", SUBMISSION_TEMPLATE)
+    image_dirs = ("train_images", "val_images", "test_images")
+    return [name for name in csv_files if not (directory / name).is_file()] + [
+        f"{name}/" for name in image_dirs if not (directory / name).is_dir()
+    ]
+
+
 @contextmanager
-def dataset_path(extracted_dir):
-    if extracted_dir is not None:
-        if not extracted_dir.is_dir():
-            raise FileNotFoundError(f"The extracted dataset directory does not exist: {extracted_dir}")
-        yield extracted_dir
+def dataset_path(data_dir):
+    source = (data_dir if data_dir is not None else PACKAGE_ROOT / "data").expanduser().resolve()
+    missing_extracted = missing_dataset_entries(source)
+    if not missing_extracted:
+        yield source
         return
-    data = PACKAGE_ROOT / "data"
-    archive_path = data / "nycu-aimi-2026-lab3-cxr.zip"
-    sample_path = data / "test_data_sample.csv"
-    if not archive_path.is_file() or not sample_path.is_file():
-        raise FileNotFoundError("Pass --data-dir with the extracted course dataset and test_data_sample.csv.")
+
+    archive_path = source / DATASET_ARCHIVE
+    sample_path = source / SUBMISSION_TEMPLATE
+    missing_archive_inputs = [file.name for file in (archive_path, sample_path) if not file.is_file()]
+    if missing_archive_inputs:
+        raise FileNotFoundError(
+            f"Course dataset is incomplete in {source}.\n"
+            f"  ZIP layout is missing: {', '.join(missing_archive_inputs)}\n"
+            f"  Extracted layout is missing: {', '.join(missing_extracted)}\n"
+            f"  Copy {DATASET_ARCHIVE} and {SUBMISSION_TEMPLATE} to this directory, "
+            "or set --data-dir to the directory with the course data. "
+            "The course dataset is distributed separately from GitHub."
+        )
+
     with TemporaryDirectory(prefix="cxr-submit-data-") as temp:
         target = Path(temp)
         with ZipFile(archive_path) as archive:
             archive.extractall(target)
-        shutil.copyfile(sample_path, target / "test_data_sample.csv")
+        shutil.copyfile(sample_path, target / SUBMISSION_TEMPLATE)
+        missing = missing_dataset_entries(target)
+        if missing:
+            raise FileNotFoundError(f"Course archive {archive_path} is missing: {', '.join(missing)}")
         yield target
 
 
@@ -101,7 +123,7 @@ class CXRDataset(Dataset):
         self.cnn_transform = cnn_transform
         self.augment = augment
         self.labeled = split != "test"
-        csv_name = f"{split}_data.csv" if self.labeled else "test_data_sample.csv"
+        csv_name = f"{split}_data.csv" if self.labeled else SUBMISSION_TEMPLATE
         
         self.affine = transforms.RandomAffine(
             degrees=5, translate=(0.03, 0.03), interpolation=transforms.InterpolationMode.BILINEAR
@@ -539,7 +561,10 @@ def train(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Train the submitted CXR-HierViT-Hybrid V1 model.")
-    parser.add_argument("--data-dir", type=Path, help="Use an extracted dataset instead of the bundled ZIP")
+    parser.add_argument(
+        "--data-dir", type=Path,
+        help="Directory containing the course ZIP and CSV template, or the extracted files (default: ./data beside this script)",
+    )
     parser.add_argument("--output-dir", type=Path, required=True, help="New directory for training results")
     parser.add_argument("--epochs", type=int, default=6)
     parser.add_argument("--batch-size", type=int, default=6)
@@ -554,7 +579,12 @@ def main():
 
     configure_cache()
     output = args.output_dir.resolve()
-    with dataset_path(args.data_dir) as data, TemporaryDirectory(prefix="cxr-submit-train-") as temp:
+    with ExitStack() as stack:
+        try:
+            data = stack.enter_context(dataset_path(args.data_dir))
+        except FileNotFoundError as error:
+            parser.error(str(error))
+        temp = stack.enter_context(TemporaryDirectory(prefix="cxr-submit-train-"))
         output.mkdir(parents=True, exist_ok=False)
         args.data_dir, args.output_dir = data, Path(temp)
         train(args)

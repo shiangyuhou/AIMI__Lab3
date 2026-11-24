@@ -22,13 +22,20 @@ python -m pip check
 python -c 'import torch; assert torch.cuda.is_available(); print(torch.__version__, torch.cuda.get_device_name())'
 ```
 
+### 手動處理的部分
+
+```
+# 記得先放好 nycu-aimi-2026-lab3-cxr.zip 和 test_data_sample.csv 到 ./data 資料夾
+```
+
+
 ### 從頭重訓
 
-將課程提供的 `nycu-aimi-2026-lab3-cxr.zip` 和 `test_data_sample.csv` 放入程式同層的 `data/`。首次訓練若沒有快取，程式會下載 RAD-DINO 和 ConvNeXt-Tiny 的官方預訓練參數。重訓預設使用 seed 42 訓練六輪，依驗證 Macro F1 選擇最佳輪次。
+首次訓練若沒有快取，程式會下載 RAD-DINO 和 ConvNeXt-Tiny 的官方預訓練參數。重訓預設使用 seed 42 訓練六輪，依驗證 Macro F1 選擇最佳輪次。
 
 ```bash
-python train_cxr_hybrid.py --output-dir retrain_output
-cmp submission_best.csv retrain_output/submission.csv
+python train_cxr_hybrid.py --output-dir retrain_output &&
+  cmp submission_best.csv retrain_output/submission.csv
 ```
 
 實測重訓產生的提交檔與 `submission_best.csv` 逐位元組一致。`cmp` 沒有輸出即表示兩份檔案相同。
